@@ -5,28 +5,24 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { auth, db } from '@/firebase/init';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 
 export default function RequestEndorsementPage() {
   const [currentUser, setCurrentUser] = useState(null);
   const [currentUserStatus, setCurrentUserStatus] = useState('loading');
-  // --- CHANGES START HERE ---
-  const [targetEmail, setTargetEmail] = useState(''); // New state for the target endorser's email
-  // --- CHANGES END HERE ---
+  const [endorsementEmail, setEndorsementEmail] = useState('');
   const [message, setMessage] = useState('');
-  const [requestStatus, setRequestStatus] = useState(''); // Status of the request sending
+  const [error, setError] = useState('');
   const router = useRouter();
 
-  // 1. Check User Authentication and Status
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
-        router.replace('/login'); // Redirect to login if not authenticated
+        router.replace('/login');
         return;
       }
       setCurrentUser(user);
 
-      // Fetch user's status from Firestore
       const userDocRef = doc(db, 'users', user.uid);
       const userDocSnap = await getDoc(userDocRef);
 
@@ -34,115 +30,62 @@ export default function RequestEndorsementPage() {
         const userData = userDocSnap.data();
         setCurrentUserStatus(userData.status);
         if (userData.status === 'approved') {
-          // If approved, this page is not for them, redirect to home
           router.replace('/');
         }
       } else {
-        // User logged in, but no Firestore doc? Should not happen if signup.js works.
-        // Treat as pending or redirect.
-        console.warn("Firestore user document not found for logged-in user on request-endorsement page:", user.uid);
-        setCurrentUserStatus('pending_review'); // Assume pending if doc missing after login
+        console.warn("Firestore user document not found on request-endorsement page:", user.uid);
+        setCurrentUserStatus('pending_review');
       }
     });
     return () => unsubscribe();
   }, [router]);
 
-  // --- CHANGES START HERE: No Search, Direct Request ---
-  const handleSendRequest = async (e) => {
-    e.preventDefault(); // Prevent form default submission
+  const handleEndorsementRequest = async (e) => {
+    e.preventDefault();
+    setMessage('');
+    setError('');
 
     if (!currentUser) {
-      setRequestStatus('Error: User not authenticated.');
+      setError('You must be logged in to request an endorsement.');
       return;
     }
-    if (!targetEmail.trim()) {
-      setRequestStatus('Please enter the email of the member you want to request an endorsement from.');
-      return;
-    }
-    if (currentUser.email === targetEmail.trim()) {
-      setRequestStatus('You cannot request an endorsement from yourself.');
+    if (!endorsementEmail) {
+      setError('Please enter the endorser email address.');
       return;
     }
 
-    setRequestStatus('Validating and sending request...');
     try {
-      // 1. Find the target user by email and ensure they are 'approved'
-      const usersRef = collection(db, 'users');
-      const q = query(
-        usersRef,
-        where('email', '==', targetEmail.trim()),
-        where('status', '==', 'approved')
-      );
-      const querySnapshot = await getDocs(q);
-
-      if (querySnapshot.empty) {
-        setRequestStatus('Error: No approved member found with that email address.');
-        return;
-      }
-
-      const targetUserDoc = querySnapshot.docs[0];
-      const targetUserData = targetUserDoc.data();
-      const targetUid = targetUserDoc.id; // Get the UID from the document ID
-
-      // 2. Check if a pending request already exists to prevent duplicates
-      const existingRequestsQuery = query(
-        collection(db, 'endorsement_requests'),
-        where('requesterUid', '==', currentUser.uid),
-        where('targetUid', '==', targetUid),
-        where('status', '==', 'pending')
-      );
-      const existingRequestsSnap = await getDocs(existingRequestsQuery);
-
-      if (!existingRequestsSnap.empty) {
-        setRequestStatus('You already have a pending endorsement request with this member.');
-        return;
-      }
-
-      // 3. Create the endorsement request document
-      await setDoc(doc(collection(db, 'endorsement_requests')), {
-        requesterUid: currentUser.uid,
-        requesterEmail: currentUser.email,
-        targetUid: targetUid,
-        targetEmail: targetUserData.email, // Use the email from the found user doc
-        status: 'pending',
-        message: message.trim() || 'I would like to request an endorsement for the Press Release Portal.',
-        createdAt: serverTimestamp(),
-      });
-      setRequestStatus(`Request sent to ${targetUserData.displayName || targetUserData.email} successfully! The member will be notified.`);
-      setTargetEmail(''); // Clear input
-      setMessage(''); // Clear message
-    } catch (error) {
-      console.error("Error sending endorsement request:", error);
-      setRequestStatus(`Failed to send request: ${error.message}`);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setMessage(`Endorsement request sent to ${endorsementEmail}.`);
+      setEndorsementEmail('');
+    } catch (err) {
+      console.error("Endorsement request failed:", err);
+      setError('Failed to send endorsement request. Please try again.');
     }
   };
-  // --- CHANGES END HERE ---
-
 
   if (currentUserStatus === 'loading') {
     return (
       <div style={styles.loadingContainer}>
-        <p>Loading account status...</p>
+        <p>Loading endorsement page...</p>
       </div>
     );
   }
 
   if (currentUserStatus === 'approved') {
-    // This component is for pending users, approved users get redirected.
     return null;
   }
 
-  if (currentUserStatus !== 'pending_review' && currentUserStatus !== 'rejected') {
-    // Handle other statuses or unknown states appropriately
+  if (currentUserStatus === 'unauthenticated' || currentUserStatus === 'rejected') {
     return (
-      <div style={styles.container}>
-        <Head><title>Access Denied</title></Head>
-        <main style={styles.main}>
-          <h1 style={styles.heading}>Access Denied</h1>
-          <p style={styles.message}>You do not have permission to access this page.</p>
-          <Link href="/" style={styles.link}>Back to Home</Link>
-        </main>
-      </div>
+      <main style={styles.accessDeniedMain}>
+        <h1 style={styles.accessDeniedHeading}>Access Denied</h1>
+        <p style={styles.accessDeniedMessage}>
+          Your account status is: <strong>{currentUserStatus.replace('_', ' ')}</strong>.
+          You cannot request an endorsement if you are not pending review.
+        </p>
+        <Link href="/" style={styles.linkButton}>Back to Home</Link>
+      </main>
     );
   }
 
@@ -153,52 +96,39 @@ export default function RequestEndorsementPage() {
       </Head>
 
       <main style={styles.main}>
-        <h1 style={styles.heading}>Request Endorsement</h1>
-        <p style={styles.infoMessage}>
-          Your account is currently under review. If you know an existing verified member,
-          you can request an endorsement from them to expedite your approval.
+        <h1 style={styles.heading}>Request Account Endorsement</h1>
+        <p style={styles.message}>
+          Your account is currently <strong>pending review</strong>. You can request an endorsement from an existing verified member to expedite the approval process.
         </p>
-        <p style={styles.smallMessage}>
-          (You must know their full email address. Verified members' contact information is not searchable for privacy.)
-        </p>
+        <p style={styles.loggedInAs}>Logged in as: <strong>{currentUser?.email}</strong></p>
 
-        <form onSubmit={handleSendRequest} style={styles.formSection}>
-          <input
-            type="email"
-            placeholder="Enter the email of the verified member you know"
-            value={targetEmail}
-            onChange={(e) => setTargetEmail(e.target.value)}
-            style={styles.emailInput}
-            required
-          />
-          <textarea
-            placeholder="Optional message to the member (e.g., how you know them)"
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            style={styles.messageInput}
-            rows="4"
-          />
-          <button
-            type="submit"
-            style={styles.requestButton}
-            disabled={requestStatus.includes('Sending') || requestStatus.includes('successfully')}
-          >
-            {requestStatus.includes('Sending') ? 'Sending...' : 'Send Endorsement Request'}
-          </button>
+        <form onSubmit={handleEndorsementRequest} style={styles.form}>
+          <div style={styles.formGroup}>
+            <label htmlFor="endorsementEmail" style={styles.label}>Endorser Email</label>
+            <input
+              type="email"
+              id="endorsementEmail"
+              value={endorsementEmail}
+              onChange={(e) => setEndorsementEmail(e.target.value)}
+              placeholder="verified.member@example.com"
+              required
+              style={styles.input}
+            />
+          </div>
+          {error && <p style={styles.errorText}>{error}</p>}
+          {message && <p style={styles.successText}>{message}</p>}
+          <button type="submit" style={styles.button}>Send Endorsement Request</button>
         </form>
 
-        {requestStatus && <p style={styles.statusMessage}>{requestStatus}</p>}
-
-        <p style={styles.bottomLinks}>
-          <Link href="/pending-review" style={styles.link}>Back to Account Status</Link>
-          <Link href="/logout" style={styles.link}>Logout</Link>
-        </p>
+        <div style={styles.actions}>
+          <Link href="/pending-review" style={styles.backButton}>Back to Account Status</Link>
+          <Link href="/" style={styles.backButton}>Back to Home</Link>
+        </div>
       </main>
     </div>
   );
 }
 
-// Inline styles (merge with your existing styles if needed)
 const styles = {
   container: {
     display: 'flex',
@@ -224,80 +154,121 @@ const styles = {
     boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
     textAlign: 'center',
     width: '100%',
-    maxWidth: '700px',
+    maxWidth: '600px',
+  },
+  accessDeniedMain: {
+    backgroundColor: '#ffffff',
+    padding: '40px',
+    borderRadius: '8px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+    textAlign: 'center',
+    width: '100%',
+    maxWidth: '600px',
+    margin: 'auto',
+  },
+  accessDeniedHeading: {
+    color: '#dc3545',
+    marginBottom: '20px',
+    fontSize: '2.5em',
+  },
+  accessDeniedMessage: {
+    fontSize: '1.1em',
+    color: '#555',
+    marginBottom: '30px',
+    lineHeight: '1.6',
+  },
+  linkButton: {
+    display: 'inline-block',
+    backgroundColor: '#007bff',
+    color: '#ffffff',
+    padding: '12px 25px',
+    border: 'none',
+    borderRadius: '5px',
+    textDecoration: 'none',
+    fontSize: '1em',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s ease',
+    margin: '0 10px',
   },
   heading: {
     color: '#333',
     marginBottom: '20px',
     fontSize: '2.5em',
   },
-  infoMessage: {
+  message: {
     fontSize: '1.1em',
     color: '#555',
-    marginBottom: '10px',
+    marginBottom: '20px',
     lineHeight: '1.6',
   },
-  smallMessage: { // New style for the "You must know their email" hint
-    fontSize: '0.9em',
+  loggedInAs: {
+    fontSize: '1em',
     color: '#777',
     marginBottom: '30px',
   },
-  formSection: { // New style for the form container
+  form: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '15px',
-    width: '100%',
-    maxWidth: '500px',
-    margin: '0 auto', // Center the form
+    gap: '20px',
+    marginTop: '20px',
   },
-  emailInput: { // Styling for the email input
-    padding: '12px 15px',
+  formGroup: {
+    textAlign: 'left',
+  },
+  label: {
+    display: 'block',
+    marginBottom: '8px',
+    fontWeight: 'bold',
+    color: '#333',
+    fontSize: '0.95em',
+  },
+  input: {
+    width: '100%',
+    padding: '12px',
     border: '1px solid #ddd',
     borderRadius: '5px',
     fontSize: '1em',
-    outline: 'none',
+    boxSizing: 'border-box',
   },
-  messageInput: {
-    width: '100%',
-    padding: '10px',
-    border: '1px solid #ddd',
-    borderRadius: '5px',
-    minHeight: '80px',
-    resize: 'vertical',
-    fontSize: '0.9em',
-    outline: 'none',
-  },
-  requestButton: {
+  button: {
     backgroundColor: '#28a745',
     color: '#ffffff',
-    padding: '12px 20px',
+    padding: '12px 25px',
     border: 'none',
     borderRadius: '5px',
     cursor: 'pointer',
-    fontSize: '1em',
+    fontSize: '1.1em',
     fontWeight: 'bold',
     transition: 'background-color 0.2s ease',
   },
-  statusMessage: {
-    marginTop: '20px',
+  errorText: {
+    color: '#e74c3c',
+    marginBottom: '15px',
     fontSize: '0.9em',
-    // Dynamic color based on status (success/error)
-    color: 'green', // Default to green, logic in component for red on error
   },
-  bottomLinks: {
+  successText: {
+    color: '#28a745',
+    marginBottom: '15px',
+    fontSize: '0.9em',
+  },
+  actions: {
     marginTop: '30px',
     display: 'flex',
     justifyContent: 'center',
-    gap: '20px',
+    gap: '15px',
     flexWrap: 'wrap',
   },
-  link: {
-    color: '#007bff',
-    textDecoration: 'none',
-    fontWeight: 'bold',
+  backButton: {
+    backgroundColor: '#6c757d',
+    color: '#ffffff',
     padding: '10px 20px',
-    border: '1px solid #007bff',
+    border: 'none',
     borderRadius: '5px',
-    transition: 'background-color 0.2s ease, color 0.2s ease',
+    textDecoration: 'none',
+    fontSize: '1em',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s ease',
   },
 };

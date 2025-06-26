@@ -1,69 +1,76 @@
-// src/pages/verified-news/index.js (This will be accessible at /verified-news)
+// src/pages/verified-news/index.js
 import Head from 'next/head';
 import Link from 'next/link';
-import { useState, useEffect } from 'react';
-import { db } from '@/firebase/init.js';
-import { collection, query, orderBy, getDocs } from 'firebase/firestore';
+import { useState, useEffect, useMemo } from 'react';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { db } from '@/firebase/init';
 import Fuse from 'fuse.js';
 
-export default function VerifiedNewsPage() { // Changed component name
-  const [pressReleases, setPressReleases] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+export default function VerifiedNewsPage() {
+  const [allPressReleases, setAllPressReleases] = useState([]);
   const [filteredPressReleases, setFilteredPressReleases] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // Fetch ALL Press Releases (publicly accessible)
-  useEffect(() => {
-    const fetchAllPressReleases = async () => {
-      setLoading(true);
-      try {
-        // Query to get all press releases, ordered by creation date
-        const q = query(
-          collection(db, 'press_releases'),
-          orderBy('createdAt', 'desc')
-        );
-        const querySnapshot = await getDocs(q);
-        const fetchedReleases = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setPressReleases(fetchedReleases);
-        setFilteredPressReleases(fetchedReleases);
-      } catch (error) {
-        console.error("Error fetching public press releases:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchAllPressReleases();
-  }, []);
-
-  // Fuse.js search options
-  const fuseOptions = {
-    keys: [
-      'headline', 'location', 'what', 'who', 'when', 'where', 'why', 'how',
-    ],
+  // Fuse.js options for fuzzy searching
+  const fuseOptions = useMemo(() => ({
+    keys: ['headline', 'what', 'who', 'location'],
     threshold: 0.3,
     includeScore: true,
-  };
+  }), []);
 
-  // Handle search input change
   useEffect(() => {
-    if (searchTerm === '') {
-      setFilteredPressReleases(pressReleases);
-    } else {
-      const fuse = new Fuse(pressReleases, fuseOptions);
-      const result = fuse.search(searchTerm);
-      setFilteredPressReleases(result.map(item => item.item));
-    }
-  }, [searchTerm, pressReleases]);
+    const q = query(
+      collection(db, 'press_releases'),
+      where('status', '==', 'approved')
+    );
 
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const releases = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setAllPressReleases(releases);
+      setLoading(false);
+    }, (err) => {
+      console.error("Error fetching approved press releases:", err);
+      setError("Failed to load news feed. Please try again.");
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Effect for filtering based on search term
+  useEffect(() => {
+    if (searchTerm.trim() === '') {
+      setFilteredPressReleases(allPressReleases);
+    } else {
+      const fuse = new Fuse(allPressReleases, fuseOptions);
+      const result = fuse.search(searchTerm).map(item => item.item);
+      setFilteredPressReleases(result);
+    }
+  }, [searchTerm, allPressReleases, fuseOptions]); // Added fuseOptions to dependency array
 
   if (loading) {
     return (
       <div style={styles.loadingContainer}>
-        <p>Loading verified news...</p>
+        <p>Loading verified news feed...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div style={styles.container}>
+        <main style={styles.main}>
+          <h1 style={styles.heading}>Error</h1>
+          <p style={styles.errorText}>{error}</p>
+          <Link href="/" passHref>
+            <button style={styles.backButton}>Back to Home</button>
+          </Link>
+        </main>
       </div>
     );
   }
@@ -71,184 +78,174 @@ export default function VerifiedNewsPage() { // Changed component name
   return (
     <div style={styles.container}>
       <Head>
-        <title>Verified News</title>
+        <title>Verified News Feed</title>
       </Head>
 
       <main style={styles.main}>
-        <h1 style={styles.heading}>Verified News</h1>
-        <p style={styles.subheading}>Browse public announcements and fact checks.</p>
+        <h1 style={styles.heading}>Verified News Feed</h1>
+        <p style={styles.subheading}>
+          Browse press releases that have been approved by our moderators.
+        </p>
 
-        <div style={styles.topSection}>
+        <div style={styles.searchBar}>
           <input
             type="text"
-            placeholder="Search verified news..."
+            placeholder="Search news by headline, content, etc."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             style={styles.searchInput}
           />
         </div>
 
-        {filteredPressReleases.length === 0 && searchTerm === '' && (
-          <p style={styles.noReleases}>No verified news has been published yet.</p>
-        )}
-
-        {filteredPressReleases.length === 0 && searchTerm !== '' && (
-          <p style={styles.noReleases}>No results found for "{searchTerm}" in verified news.</p>
-        )}
-
-        <div style={styles.grid}>
-          {filteredPressReleases.map((release) => (
-            <div key={release.id} style={styles.card}>
-              {/* IMPORTANT: This links to the detail page at /press-releases/[id], NOT /verified-news/[id] */}
-              <Link href={`/press-releases/${release.id}`} passHref>
+        {filteredPressReleases.length === 0 && searchTerm.length > 0 ? (
+          <p style={styles.message}>No press releases found matching {searchTerm}.</p>
+        ) : filteredPressReleases.length === 0 && searchTerm.length === 0 && !loading ? (
+          <p style={styles.message}>No approved press releases available yet.</p>
+        ) : (
+          <div style={styles.grid}>
+            {filteredPressReleases.map((release) => (
+              <div key={release.id} style={styles.card}>
                 <h2 style={styles.cardTitle}>{release.headline}</h2>
-              </Link>
-              <p style={styles.cardLocationDate}>
-                {release.location} : {release.date}
-              </p>
-              <p style={styles.cardSnippet}>
-                {release.what?.substring(0, 150)}{release.what?.length > 150 ? '...' : ''}
-              </p>
-              <div style={styles.cardActions}>
+                <p style={styles.cardMeta}>{release.location}, {release.date}</p>
+                <p style={styles.cardContent}>{release.what.substring(0, 150)}...</p>
                 <Link href={`/press-releases/${release.id}`} passHref>
-                  <button style={styles.viewButton}>View Details</button>
+                  <span style={styles.viewDetailsButton}>View Details</span>
                 </Link>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
-        <p style={styles.homeLink}>
-            <Link href="/" style={styles.link}>Back to Home</Link>
-        </p>
+        <div style={styles.actions}>
+          <Link href="/" passHref>
+            <button style={styles.backButton}>Back to Home</button>
+          </Link>
+        </div>
       </main>
     </div>
   );
 }
 
 const styles = {
-    container: {
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      fontFamily: 'sans-serif',
-      backgroundColor: '#f0f2f5',
-      padding: '20px',
-    },
-    loadingContainer: {
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      fontFamily: 'sans-serif',
-    },
-    main: {
-      backgroundColor: '#ffffff',
-      padding: '40px',
-      borderRadius: '8px',
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-      textAlign: 'center',
-      width: '100%',
-      maxWidth: '900px',
-    },
-    heading: {
-      color: '#333',
-      marginBottom: '10px',
-      fontSize: '2.5em',
-    },
-    subheading: {
-      fontSize: '1.1em',
-      color: '#555',
-      marginBottom: '30px',
-    },
-    topSection: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: '30px',
-      width: '100%',
-    },
-    searchInput: {
-      padding: '10px 15px',
-      border: '1px solid #ddd',
-      borderRadius: '5px',
-      fontSize: '1em',
-      width: '100%',
-      maxWidth: '500px',
-      boxSizing: 'border-box',
-    },
-    noReleases: {
-      fontSize: '1.1em',
-      color: '#555',
-      marginTop: '30px',
-    },
-    grid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-      gap: '20px',
-      width: '100%',
-      marginTop: '20px',
-    },
-    card: {
-      backgroundColor: '#f9f9f9',
-      border: '1px solid #e0e0e0',
-      borderRadius: '8px',
-      padding: '20px',
-      textAlign: 'left',
-      boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'space-between',
-    },
-    cardTitle: {
-      fontSize: '1.5em',
-      color: '#0070f3',
-      marginBottom: '10px',
-      textDecoration: 'none',
-    },
-    cardLocationDate: {
-      fontSize: '0.9em',
-      color: '#666',
-      marginBottom: '10px',
-    },
-    cardSnippet: {
-      fontSize: '0.95em',
-      color: '#444',
-      marginBottom: '15px',
-      lineHeight: '1.5',
-    },
-    cardActions: {
-      display: 'flex',
-      gap: '10px',
-      marginTop: '15px',
-      justifyContent: 'flex-end',
-    },
-    viewButton: {
-      backgroundColor: '#007bff',
-      color: '#ffffff',
-      padding: '8px 15px',
-      border: 'none',
-      borderRadius: '5px',
-      cursor: 'pointer',
-      fontSize: '0.9em',
-      transition: 'background-color 0.2s ease',
-    },
-    homeLink: {
-        marginTop: '30px',
-    },
-    link: {
-      color: '#0070f3',
-      textDecoration: 'none',
-      fontWeight: 'bold',
-      padding: '10px 20px',
-      border: '1px solid #0070f3',
-      borderRadius: '5px',
-      transition: 'background-color 0.2s ease, color 0.2s ease',
-    },
-    linkHover: {
-      backgroundColor: '#0070f3',
-      color: '#ffffff',
-    },
-  };
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    fontFamily: 'sans-serif',
+    backgroundColor: '#f0f2f5',
+    padding: '20px',
+  },
+  loadingContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    fontFamily: 'sans-serif',
+  },
+  main: {
+    backgroundColor: '#ffffff',
+    padding: '40px',
+    borderRadius: '8px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+    textAlign: 'center',
+    width: '100%',
+    maxWidth: '1000px',
+  },
+  heading: {
+    color: '#333',
+    marginBottom: '15px',
+    fontSize: '2.5em',
+  },
+  subheading: {
+    fontSize: '1.2em',
+    color: '#555',
+    marginBottom: '30px',
+  },
+  searchBar: {
+    marginBottom: '25px',
+    width: '100%',
+    maxWidth: '500px',
+  },
+  searchInput: {
+    width: '100%',
+    padding: '12px',
+    border: '1px solid #ddd',
+    borderRadius: '5px',
+    fontSize: '1em',
+    boxSizing: 'border-box',
+  },
+  message: {
+    fontSize: '1.1em',
+    color: '#555',
+    marginTop: '20px',
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+    gap: '20px',
+    marginTop: '30px',
+    width: '100%',
+  },
+  card: {
+    backgroundColor: '#f9f9f9',
+    padding: '20px',
+    borderRadius: '8px',
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+    textAlign: 'left',
+    borderLeft: '5px solid #28a745',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  cardTitle: {
+    fontSize: '1.5em',
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: '10px',
+  },
+  cardMeta: {
+    fontSize: '0.9em',
+    color: '#777',
+    marginBottom: '10px',
+  },
+  cardContent: {
+    fontSize: '0.9em',
+    color: '#555',
+    lineHeight: '1.5',
+    marginBottom: '15px',
+    flexGrow: 1,
+  },
+  viewDetailsButton: {
+    display: 'inline-block',
+    backgroundColor: '#007bff',
+    color: '#ffffff',
+    padding: '8px 15px',
+    borderRadius: '5px',
+    textDecoration: 'none',
+    fontSize: '0.9em',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s ease',
+    marginTop: '10px',
+  },
+  actions: {
+    marginTop: '40px',
+  },
+  backButton: {
+    backgroundColor: '#6c757d',
+    color: '#ffffff',
+    padding: '10px 20px',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '1em',
+    fontWeight: 'bold',
+    transition: 'background-color 0.2s ease',
+  },
+  errorText: {
+    color: '#e74c3c',
+    marginBottom: '15px',
+    fontSize: '0.9em',
+  },
+};

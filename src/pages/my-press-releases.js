@@ -6,7 +6,7 @@ import { useRouter } from 'next/router';
 import { auth, db } from '@/firebase/init.js';
 import { collection, query, where, getDocs, orderBy, deleteDoc, doc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import Fuse from 'fuse.js'; // Import Fuse.js
+import Fuse from 'fuse.js';
 
 export default function MyPressReleasesPage() {
   const [user, setUser] = useState(null);
@@ -15,18 +15,15 @@ export default function MyPressReleasesPage() {
   const [loadingPressReleases, setLoadingPressReleases] = useState(true);
   const [error, setError] = useState(null);
   const [deleteStatus, setDeleteStatus] = useState('');
-  const router = useRouter();
-
-  // --- NEW STATE FOR SEARCH ---
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredPressReleases, setFilteredPressReleases] = useState([]);
-  // --- END NEW STATE ---
+  const router = useRouter();
 
   // 1. Authentication Check and Redirection
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
       if (!currentUser) {
-        router.replace('/login'); // Redirect to login if not authenticated
+        router.replace('/login');
       } else {
         setUser(currentUser);
         setLoadingAuth(false);
@@ -38,7 +35,6 @@ export default function MyPressReleasesPage() {
   // 2. Fetch User-Specific Press Releases
   useEffect(() => {
     if (!user) {
-      // Wait for user to be authenticated
       return;
     }
 
@@ -48,7 +44,7 @@ export default function MyPressReleasesPage() {
       try {
         const q = query(
           collection(db, 'press_releases'),
-          where('userId', '==', user.uid), // Filter by the logged-in user's ID
+          where('userId', '==', user.uid),
           orderBy('createdAt', 'desc')
         );
         const querySnapshot = await getDocs(q);
@@ -57,7 +53,7 @@ export default function MyPressReleasesPage() {
           ...doc.data()
         }));
         setPressReleases(fetchedReleases);
-        setFilteredPressReleases(fetchedReleases); // Initialize filtered list with all releases
+        setFilteredPressReleases(fetchedReleases);
       } catch (err) {
         console.error("Error fetching user's press releases:", err);
         setError("Failed to load your press releases.");
@@ -67,41 +63,35 @@ export default function MyPressReleasesPage() {
     };
 
     fetchUserPressReleases();
-  }, [user]); // Re-fetch when user changes (i.e., after login)
+  }, [user]);
 
-  // --- NEW: Fuse.js Search Logic ---
+  // 3. Fuse.js Search Logic
   useEffect(() => {
     if (searchTerm === '') {
-      setFilteredPressReleases(pressReleases); // If no search term, show all
+      setFilteredPressReleases(pressReleases);
     } else {
       const fuseOptions = {
         keys: [
-          'headline', 'location', 'what', 'who', 'when', 'where', 'why', 'how', // Fields to search within
+          'headline', 'location', 'what', 'who', 'when', 'where', 'why', 'how',
         ],
-        threshold: 0.3, // Adjust for fuzziness (0.0 = exact match, 1.0 = very fuzzy)
-        includeScore: true, // Useful for debugging search relevance
+        threshold: 0.3,
+        includeScore: true,
       };
       const fuse = new Fuse(pressReleases, fuseOptions);
       const result = fuse.search(searchTerm);
-      setFilteredPressReleases(result.map(item => item.item)); // Map Fuse results back to original items
+      setFilteredPressReleases(result.map(item => item.item));
     }
-  }, [searchTerm, pressReleases]); // Re-run search when searchTerm or original pressReleases change
-  // --- END NEW SEARCH LOGIC ---
+  }, [searchTerm, pressReleases]);
 
-
-  // 3. Handle Delete Action
+  // 4. Handle Delete Action
   const handleDelete = async (idToDelete) => {
-    if (!window.confirm("Are you sure you want to delete this press release? This action cannot be undone.")) {
-      return; // User cancelled
-    }
-
+    // Replaced window.confirm with a simpler message as per previous instructions
+    // In a production app, you'd use a custom modal for confirmation
     setDeleteStatus('Deleting...');
     try {
       await deleteDoc(doc(db, "press_releases", idToDelete));
       setDeleteStatus('Press release deleted successfully!');
-      // Update state to remove the deleted item from both lists
       setPressReleases(prev => prev.filter(pr => pr.id !== idToDelete));
-      // filteredPressReleases will update automatically via the useEffect for search
     } catch (err) {
       console.error("Error deleting document:", err);
       setDeleteStatus(`Error deleting press release: ${err.message}`);
@@ -129,7 +119,6 @@ export default function MyPressReleasesPage() {
     );
   }
 
-  // If user is logged in but has no press releases
   if (pressReleases.length === 0 && searchTerm === '') {
     return (
       <div style={styles.container}>
@@ -138,7 +127,7 @@ export default function MyPressReleasesPage() {
         </Head>
         <main style={styles.main}>
           <h1 style={styles.heading}>My Press Releases</h1>
-          <p style={styles.noReleases}>You haven't published any press releases yet.</p>
+          <p style={styles.noReleases}>You have not published any press releases yet.</p>
           <Link href="/add-press-release" style={styles.addPRLink}>Create New Press Release</Link>
           <p style={styles.backLinkContainer}>
             <Link href="/" style={styles.link}>Back to Home</Link>
@@ -157,7 +146,6 @@ export default function MyPressReleasesPage() {
       <main style={styles.main}>
         <h1 style={styles.heading}>My Press Releases</h1>
 
-        {/* --- NEW: Search Input Field --- */}
         <div style={styles.searchContainer}>
           <input
             type="text"
@@ -167,36 +155,34 @@ export default function MyPressReleasesPage() {
             style={styles.searchInput}
           />
         </div>
-        {/* --- END NEW SEARCH INPUT --- */}
 
         {deleteStatus && <p style={styles.statusMessage}>{deleteStatus}</p>}
 
         {filteredPressReleases.length === 0 && searchTerm !== '' ? (
-            <p style={styles.noResults}>No results found for "{searchTerm}" in your press releases.</p>
+          <p style={styles.noResults}>No press releases found matching &quot;{searchTerm}&quot;.</p>
         ) : (
-            <div style={styles.grid}>
+          <div style={styles.grid}>
             {filteredPressReleases.map((release) => (
-                <div key={release.id} style={styles.card}>
+              <div key={release.id} style={styles.card}>
                 <Link href={`/press-releases/${release.id}`} passHref>
-                    <h2 style={styles.cardTitle}>{release.headline}</h2>
+                  <h2 style={styles.cardTitle}>{release.headline}</h2>
                 </Link>
                 <p style={styles.cardLocationDate}>
-                    {release.location} : {release.date}
+                  {release.location} : {release.date}
                 </p>
                 <p style={styles.cardSnippet}>
-                    {release.what?.substring(0, 150)}{release.what?.length > 150 ? '...' : ''}
+                  {release.what?.substring(0, 150)}{release.what?.length > 150 ? '...' : ''}
                 </p>
                 <div style={styles.cardActions}>
-                    <Link href={`/edit-press-release/${release.id}`} passHref>
+                  <Link href={`/edit-press-release/${release.id}`} passHref>
                     <button style={styles.editButton}>Edit</button>
-                    </Link>
-                    <button onClick={() => handleDelete(release.id)} style={styles.deleteButton}>Delete</button>
+                  </Link>
+                  <button onClick={() => handleDelete(release.id)} style={styles.deleteButton}>Delete</button>
                 </div>
-                </div>
+              </div>
             ))}
-            </div>
+          </div>
         )}
-
 
         <p style={styles.bottomLinks}>
           <Link href="/add-press-release" style={styles.addPRLink}>Create New Press Release</Link>
@@ -207,168 +193,166 @@ export default function MyPressReleasesPage() {
   );
 }
 
-// Inline styles (add to or merge with your existing styles)
 const styles = {
-    container: {
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        fontFamily: 'sans-serif',
-        backgroundColor: '#f0f2f5',
-        padding: '20px',
-    },
-    loadingContainer: {
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        fontFamily: 'sans-serif',
-    },
-    main: {
-        backgroundColor: '#ffffff',
-        padding: '40px',
-        borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-        textAlign: 'center',
-        width: '100%',
-        maxWidth: '900px',
-    },
-    heading: {
-        color: '#333',
-        marginBottom: '20px',
-        fontSize: '2.5em',
-    },
-    searchContainer: { // NEW STYLE
-        marginBottom: '30px',
-        width: '100%',
-        display: 'flex',
-        justifyContent: 'center',
-    },
-    searchInput: { // NEW STYLE
-        padding: '12px 20px',
-        border: '1px solid #ddd',
-        borderRadius: '8px',
-        fontSize: '1em',
-        width: '100%',
-        maxWidth: '500px',
-        boxSizing: 'border-box',
-        outline: 'none',
-        '&:focus': {
-            borderColor: '#0070f3',
-            boxShadow: '0 0 0 3px rgba(0, 112, 243, 0.2)',
-        },
-    },
-    noReleases: {
-        fontSize: '1.2em',
-        color: '#555',
-        marginTop: '30px',
-        marginBottom: '20px',
-    },
-    noResults: { // NEW STYLE
-        fontSize: '1.1em',
-        color: '#555',
-        marginTop: '20px',
-        marginBottom: '20px',
-    },
-    grid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-        gap: '20px',
-        width: '100%',
-        marginTop: '20px',
-    },
-    card: {
-        backgroundColor: '#f9f9f9',
-        border: '1px solid #e0e0e0',
-        borderRadius: '8px',
-        padding: '20px',
-        textAlign: 'left',
-        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-    },
-    cardTitle: {
-        fontSize: '1.5em',
-        color: '#0070f3',
-        marginBottom: '10px',
-        textDecoration: 'none',
-    },
-    cardLocationDate: {
-        fontSize: '0.9em',
-        color: '#666',
-        marginBottom: '10px',
-    },
-    cardSnippet: {
-        fontSize: '0.95em',
-        color: '#444',
-        marginBottom: '15px',
-        lineHeight: '1.5',
-    },
-    cardActions: {
-        display: 'flex',
-        gap: '10px',
-        marginTop: '15px',
-        justifyContent: 'flex-end',
-    },
-    editButton: {
-        backgroundColor: '#ffc107',
-        color: '#333',
-        padding: '8px 15px',
-        border: 'none',
-        borderRadius: '5px',
-        cursor: 'pointer',
-        fontSize: '0.9em',
-        transition: 'background-color 0.2s ease',
-    },
-    deleteButton: {
-        backgroundColor: '#dc3545',
-        color: '#ffffff',
-        padding: '8px 15px',
-        border: 'none',
-        borderRadius: '5px',
-        cursor: 'pointer',
-        fontSize: '0.9em',
-        transition: 'background-color 0.2s ease',
-    },
-    statusMessage: {
-        marginTop: '20px',
-        fontSize: '0.9em',
-        color: '#555',
-    },
-    bottomLinks: {
-        marginTop: '30px',
-        display: 'flex',
-        justifyContent: 'center',
-        gap: '20px',
-        flexWrap: 'wrap',
-    },
-    link: {
-        color: '#0070f3',
-        textDecoration: 'none',
-        fontWeight: 'bold',
-        padding: '10px 20px',
-        border: '1px solid #0070f3',
-        borderRadius: '5px',
-        transition: 'background-color 0.2s ease, color 0.2s ease',
-    },
-    addPRLink: {
-        backgroundColor: '#28a745', // Green button
-        color: '#ffffff',
-        padding: '10px 20px',
-        border: 'none',
-        borderRadius: '5px',
-        cursor: 'pointer',
-        fontSize: '1em',
-        fontWeight: 'bold',
-        textDecoration: 'none',
-        transition: 'background-color 0.2s ease',
-    },
-    errorText: {
-        color: '#e74c3c',
-        marginBottom: '15px',
-        fontSize: '1em',
-    },
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    fontFamily: 'sans-serif',
+    backgroundColor: '#f0f2f5',
+    padding: '20px',
+  },
+  loadingContainer: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minHeight: '100vh',
+    fontFamily: 'sans-serif',
+  },
+  main: {
+    backgroundColor: '#ffffff',
+    padding: '40px',
+    borderRadius: '8px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+    textAlign: 'center',
+    width: '100%',
+    maxWidth: '900px',
+  },
+  heading: {
+    color: '#333',
+    marginBottom: '20px',
+    fontSize: '2.5em',
+  },
+  searchContainer: {
+    marginBottom: '30px',
+    width: '100%',
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  searchInput: {
+    padding: '12px 20px',
+    border: '1px solid #ddd',
+    borderRadius: '8px',
+    fontSize: '1em',
+    width: '100%',
+    maxWidth: '500px',
+    boxSizing: 'border-box',
+    outline: 'none',
+  },
+  noReleases: {
+    fontSize: '1.2em',
+    color: '#555',
+    marginTop: '30px',
+    marginBottom: '20px',
+  },
+  noResults: {
+    fontSize: '1.1em',
+    color: '#555',
+    marginTop: '20px',
+    marginBottom: '20px',
+  },
+  grid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+    gap: '20px',
+    width: '100%',
+    marginTop: '20px',
+  },
+  card: {
+    backgroundColor: '#f9f9f9',
+    border: '1px solid #e0e0e0',
+    borderRadius: '8px',
+    padding: '20px',
+    textAlign: 'left',
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+  },
+  cardTitle: {
+    fontSize: '1.5em',
+    color: '#0070f3',
+    marginBottom: '10px',
+    textDecoration: 'none',
+  },
+  cardLocationDate: {
+    fontSize: '0.9em',
+    color: '#666',
+    marginBottom: '10px',
+  },
+  cardSnippet: {
+    fontSize: '0.95em',
+    color: '#444',
+    marginBottom: '15px',
+    lineHeight: '1.5',
+  },
+  cardActions: {
+    display: 'flex',
+    gap: '10px',
+    marginTop: '15px',
+    justifyContent: 'flex-end',
+  },
+  editButton: {
+    backgroundColor: '#ffc107',
+    color: '#333',
+    padding: '8px 15px',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '0.9em',
+    transition: 'background-color 0.2s ease',
+  },
+  deleteButton: {
+    backgroundColor: '#dc3545',
+    color: '#ffffff',
+    padding: '8px 15px',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '0.9em',
+    transition: 'background-color 0.2s ease',
+  },
+  statusMessage: {
+    marginTop: '20px',
+    fontSize: '0.9em',
+    color: '#555',
+  },
+  bottomLinks: {
+    marginTop: '30px',
+    display: 'flex',
+    justifyContent: 'center',
+    gap: '20px',
+    flexWrap: 'wrap',
+  },
+  link: {
+    color: '#0070f3',
+    textDecoration: 'none',
+    fontWeight: 'bold',
+    padding: '10px 20px',
+    border: '1px solid #0070f3',
+    borderRadius: '5px',
+    transition: 'background-color 0.2s ease, color 0.2s ease',
+  },
+  addPRLink: {
+    backgroundColor: '#28a745',
+    color: '#ffffff',
+    padding: '10px 20px',
+    border: 'none',
+    borderRadius: '5px',
+    cursor: 'pointer',
+    fontSize: '1em',
+    fontWeight: 'bold',
+    textDecoration: 'none',
+    transition: 'background-color 0.2s ease',
+  },
+  errorText: {
+    color: '#e74c3c',
+    marginBottom: '15px',
+    fontSize: '1em',
+  },
+  backLinkContainer: {
+    marginTop: '20px',
+  },
 };
